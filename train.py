@@ -143,8 +143,8 @@ def train_model(data_yaml, config):
         'epochs': config['epochs'],
         'batch': config['batch'],
         'imgsz': config['imgsz'],
-        'project': results_dir,  # 所有结果保存在此目录
-        'name': '',  # 空名称，所有结果直接保存在project目录
+        'project': results_dir,
+        'name': '',
         'exist_ok': False,
         'save_period': config['save_period'],
         'device': 'cpu',  # 强制使用CPU
@@ -156,7 +156,21 @@ def train_model(data_yaml, config):
         'warmup_epochs': config['warmup_epochs'],
         'optimizer': config['optimizer'],
         'seed': config['seed'],
-        'patience': config['patience']
+        'patience': config['patience'],
+        
+        # 针对小数据集的重要优化参数
+        'augment': True,  # 启用数据增强
+        'hsv_h': 0.015,   # 色调增强 (0-0.1)
+        'hsv_s': 0.7,     # 饱和度增强 (0-0.9)
+        'hsv_v': 0.4,     # 亮度增强 (0-0.9)
+        'degrees': 15.0,  # 旋转角度 (±degrees)
+        'translate': 0.1, # 平移 (±fraction)
+        'scale': 0.5,     # 缩放 (0-1)
+        'shear': 0.0,     # 剪切 (±degrees)
+        'flipud': 0.0,    # 上下翻转概率 (0-1)
+        'fliplr': 0.5,    # 左右翻转概率 (0-1)
+        'mosaic': 1.0,    # 马赛克增强概率 (0-1)
+        'mixup': 0.0,     # 混合增强概率 (0-1)
     }
     
     # 开始训练
@@ -166,7 +180,7 @@ def train_model(data_yaml, config):
     # 重命名最佳模型
     weights_dir = os.path.join(results_dir, 'weights')
     best_model_path = os.path.join(weights_dir, 'best.pt')
-    final_model_path = os.path.join(results_dir, f'model_final_{timestamp}.pt')  # 直接放在结果目录
+    final_model_path = os.path.join(results_dir, f'model_final_{timestamp}.pt')
     
     if os.path.exists(best_model_path):
         os.rename(best_model_path, final_model_path)
@@ -177,51 +191,51 @@ def train_model(data_yaml, config):
     return results_dir
 
 def parse_args():
-    """解析命令行参数"""
-    parser = argparse.ArgumentParser(description='YOLOv8训练脚本')
+    """解析命令行参数 - 针对小数据集优化"""
+    parser = argparse.ArgumentParser(description='YOLOv8小数据集训练脚本')
     
     # 模型参数
     parser.add_argument('--model', type=str, default='yolov8n', 
-                       choices=['yolov8n', 'yolov8s', 'yolov8m', 'yolov8l', 'yolov8x'],
-                       help='模型架构')
-    parser.add_argument('--pretrained', action='store_true',
-                       help='使用预训练模型')
+                       choices=['yolov8n', 'yolov8s'],
+                       help='模型架构(小数据集使用小模型)')
+    parser.add_argument('--pretrained', action='store_true', default=True,
+                       help='使用预训练模型(强烈推荐)')
     
     # 训练参数
-    parser.add_argument('--epochs', type=int, default=50,  # 减少默认epochs
+    parser.add_argument('--epochs', type=int, default=200,  # 减少训练轮数
                        help='训练轮数')
-    parser.add_argument('--batch', type=int, default=4,  # 减小默认batch_size
+    parser.add_argument('--batch', type=int, default=2,  # 减小批次大小
                        help='批次大小')
-    parser.add_argument('--imgsz', type=int, default=320,  # 减小默认图像尺寸
+    parser.add_argument('--imgsz', type=int, default=320,  # 减小图像尺寸
                        help='输入图像尺寸')
     parser.add_argument('--save-period', type=int, default=10, 
                        help='每多少轮保存一次模型')
     
     # 优化参数
-    parser.add_argument('--lr0', type=float, default=0.01, 
+    parser.add_argument('--lr0', type=float, default=0.001,  # 降低学习率
                        help='初始学习率')
-    parser.add_argument('--lrf', type=float, default=0.01, 
+    parser.add_argument('--lrf', type=float, default=0.1,  # 增加学习率衰减
                        help='最终学习率 = lr0 * lrf')
-    parser.add_argument('--momentum', type=float, default=0.937, 
+    parser.add_argument('--momentum', type=float, default=0.9, 
                        help='动量')
-    parser.add_argument('--weight-decay', type=float, default=0.0005, 
+    parser.add_argument('--weight-decay', type=float, default=0.0001,  # 增加权重衰减
                        help='权重衰减')
-    parser.add_argument('--warmup-epochs', type=float, default=3.0, 
+    parser.add_argument('--warmup-epochs', type=float, default=5.0,  # 增加预热轮数
                        help='预热轮数')
-    parser.add_argument('--optimizer', type=str, default='auto', 
+    parser.add_argument('--optimizer', type=str, default='Adam',  # 使用Adam优化器
                        choices=['SGD', 'Adam', 'AdamW', 'NAdam', 'RAdam', 'auto'],
                        help='优化器')
     
     # 数据参数
-    parser.add_argument('--val-ratio', type=float, default=0.2, 
+    parser.add_argument('--val-ratio', type=float, default=0.3,  # 增加验证集比例
                        help='验证集比例')
     
     # 系统参数
-    parser.add_argument('--workers', type=int, default=2,  # 减少默认工作线程数
+    parser.add_argument('--workers', type=int, default=1,  # 减少工作线程数
                        help='数据加载工作线程数')
     parser.add_argument('--seed', type=int, default=42, 
                        help='随机种子')
-    parser.add_argument('--patience', type=int, default=30, 
+    parser.add_argument('--patience', type=int, default=30,  # 更严格的早停
                        help='早停耐心值')
     
     return parser.parse_args()
@@ -257,7 +271,7 @@ def main():
     }
     
     # 打印配置
-    print("\n训练配置:")
+    print("\n训练配置 (针对小数据集优化):")
     for key, value in config.items():
         print(f"- {key}: {value}")
     

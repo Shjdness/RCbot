@@ -1,0 +1,13 @@
+names:
+  0: 5F
+  1: 4F
+  2: 3F
+  3: 2F
+  4: 1F
+  5: fire
+  6: shop
+  7: market
+nc: 8
+path: D:\All_save\Code_save\yolov8_trainmodel\dataset_20250621_212550
+train: images/train
+val: images/val
