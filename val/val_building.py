@@ -312,7 +312,7 @@ def test_model(model_path, test_dir, output_dir):
 
 if __name__ == "__main__":
     # 配置路径
-    MODEL_PATH = "D:/All_save/Code_save/yolov8_trainmodel/runs/building/train/weights/last.pt"
+    MODEL_PATH = "D:/All_save/Code_save/yolov8_trainmodel/runs/buildings/train/weights/last.pt"
     TEST_DIR = "D:\All_save\Code_save\yolov8_trainmodel\\allpic\\buildings\images"  # 测试图像目录
     OUTPUT_DIR = "D:\All_save\Code_save\yolov8_trainmodel\\val_save\\building"  # 结果保存目录
     

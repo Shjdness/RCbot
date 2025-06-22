@@ -166,17 +166,25 @@ def analyze_image(model, image_path, output_dir):
     }
 
 def draw_detections(image, matched_bins):
-    """在图像上绘制检测结果"""
+    """在图像上绘制检测结果 - 优化版：开关状态标签放在矩形框下方"""
     # 将OpenCV图像转换为PIL图像（更好的中文支持）
     img_pil = Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     
+    # 根据图像尺寸计算字体大小
+    img_width, img_height = img_pil.size
+    base_font_size = max(48, int(img_height * 0.05))  # 至少48px，或图像高度的5%
+    
     try:
-        # 尝试加载中文字体
-        font = ImageFont.truetype("simhei.ttf", 24)
+        # 尝试加载中文字体 - 使用非常大的字体尺寸
+        font = ImageFont.truetype("simhei.ttf", base_font_size)
+        status_font = ImageFont.truetype("simhei.ttf", base_font_size)
+        summary_font = ImageFont.truetype("simhei.ttf", int(base_font_size * 1.2))
     except:
         # 回退到默认字体
         font = ImageFont.load_default()
+        status_font = ImageFont.load_default()
+        summary_font = ImageFont.load_default()
     
     # 绘制所有匹配的垃圾桶
     for bin in matched_bins:
@@ -185,40 +193,62 @@ def draw_detections(image, matched_bins):
         bin_bbox = bin["bbox"]
         status_bbox = bin["status_bbox"]
         
-        # 绘制垃圾桶类型框
+        # 绘制垃圾桶类型框 - 加粗到6像素
         bin_color = TRASH_COLOR_MAP.get(bin_type, (255, 255, 255))
         draw.rectangle([(bin_bbox[0], bin_bbox[1]), (bin_bbox[2], bin_bbox[3])], 
-                      outline=bin_color, width=3)
+                      outline=bin_color, width=6)
         
-        # 绘制垃圾桶状态框
+        # 绘制垃圾桶状态框 - 加粗到6像素
         status_color = STATUS_COLOR_MAP.get(status, (255, 255, 255))
         draw.rectangle([(status_bbox[0], status_bbox[1]), (status_bbox[2], status_bbox[3])], 
-                      outline=status_color, width=2)
+                      outline=status_color, width=6)
         
-        # 绘制连接线
+        # 绘制连接线 - 加粗到4像素
         bin_center = calculate_center(bin_bbox)
         status_center = calculate_center(status_bbox)
-        draw.line([bin_center, status_center], fill=(255, 255, 0), width=2)
+        draw.line([bin_center, status_center], fill=(255, 255, 0), width=4)
         
-        # 绘制垃圾桶类型标签
+        # 绘制垃圾桶类型标签 - 在垃圾桶框上方
         bin_label = f"{CHINESE_NAMES[bin_type]}"
         bin_text_size = font.getbbox(bin_label)
-        draw.rectangle([(bin_bbox[0], bin_bbox[1] - bin_text_size[3] + bin_text_size[1] - 5), 
-                       (bin_bbox[0] + bin_text_size[2] - bin_text_size[0] + 10, bin_bbox[1] + 5)], 
-                      fill=bin_color)
-        draw.text((bin_bbox[0] + 5, bin_bbox[1] - bin_text_size[3] + bin_text_size[1] - 5), 
-                 bin_label, fill=(255, 255, 255), font=font)
         
-        # 绘制状态标签
+        # 计算背景框位置和大小 - 增加内边距
+        padding = base_font_size // 4
+        bg_x1 = bin_bbox[0] - padding
+        bg_y1 = bin_bbox[1] - bin_text_size[3] - padding
+        bg_x2 = bin_bbox[0] + bin_text_size[2] + padding * 2
+        bg_y2 = bin_bbox[1] + padding
+        
+        # 绘制背景框 - 使用半透明效果增加可读性
+        draw.rectangle([(bg_x1, bg_y1), (bg_x2, bg_y2)], fill=bin_color)
+        
+        # 绘制文本 - 使用高对比度的白色粗体文字
+        draw.text((bin_bbox[0], bin_bbox[1] - bin_text_size[3] - padding), 
+                 bin_label, fill=(255, 255, 255), font=font, stroke_width=2, stroke_fill=(0, 0, 0))
+        
+        # 绘制状态标签 - 放在状态框下方
         status_label = f"状态: {CHINESE_NAMES[status]}"
-        status_text_size = font.getbbox(status_label)
-        draw.rectangle([(status_bbox[0], status_bbox[1] - status_text_size[3] + status_text_size[1] - 5), 
-                       (status_bbox[0] + status_text_size[2] - status_text_size[0] + 10, status_bbox[1] + 5)], 
+        status_text_size = status_font.getbbox(status_label)
+        
+        # 计算状态标签的位置（在状态框的下方）
+        status_bg_x1 = status_bbox[0] - padding
+        status_bg_y1 = status_bbox[3] + padding  # 在状态框下方
+        status_bg_x2 = status_bbox[0] + status_text_size[2] + padding * 2
+        status_bg_y2 = status_bg_y1 + status_text_size[3] + padding * 2
+        
+        # 绘制背景框 - 使用半透明效果
+        draw.rectangle([(status_bg_x1, status_bg_y1), (status_bg_x2, status_bg_y2)], 
                       fill=status_color)
-        draw.text((status_bbox[0] + 5, status_bbox[1] - status_text_size[3] + status_text_size[1] - 5), 
-                 status_label, fill=(0, 0, 0), font=font)
+        
+        # 绘制文本 - 黑色文字带白色描边确保在任何背景上都可读
+        text_fill = (0, 0, 0) if status == "Open" else (255, 255, 255)  # 根据状态选择文字颜色
+        stroke_fill = (255, 255, 255) if text_fill == (0, 0, 0) else (0, 0, 0)  # 互补色描边
+        
+        draw.text((status_bbox[0] + padding, status_bg_y1 + padding), 
+                 status_label, fill=text_fill, font=status_font, 
+                 stroke_width=3, stroke_fill=stroke_fill)
     
-    # 在图像顶部添加汇总信息
+    # 在图像顶部添加汇总信息 - 使用非常大的字体
     if matched_bins:
         summary = f"检测到 {len(matched_bins)} 个垃圾桶"
         bin_types = defaultdict(int)
@@ -228,11 +258,19 @@ def draw_detections(image, matched_bins):
         for bin_type, count in bin_types.items():
             summary += f" | {CHINESE_NAMES[bin_type]}: {count}"
         
-        # 绘制汇总信息
-        text_size = font.getbbox(summary)
-        draw.rectangle([(10, 10), (10 + text_size[2] - text_size[0] + 20, 10 + text_size[3] - text_size[1] + 20)], 
-                      fill=(0, 0, 0, 180))
-        draw.text((20, 20), summary, fill=(255, 255, 255), font=font)
+        # 计算文本尺寸
+        text_size = summary_font.getbbox(summary)
+        
+        # 绘制半透明背景框
+        bg_height = text_size[3] - text_size[1] + base_font_size
+        draw.rectangle([(0, 0), (img_width, bg_height)], 
+                      fill=(0, 0, 0, 200))  # 半透明黑色背景
+        
+        # 绘制文本 - 使用高对比度的白色粗体文字
+        text_y = (bg_height - text_size[3] + text_size[1]) // 2
+        draw.text((img_width // 2 - text_size[2] // 2, text_y), 
+                 summary, fill=(255, 255, 255), font=summary_font, 
+                 stroke_width=3, stroke_fill=(0, 0, 0))
     
     # 将PIL图像转换回OpenCV格式
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
