@@ -1,8 +1,6 @@
-5F
-4F
-3F
-2F
-1F
-fire
-shop
-market
+Blue
+Red
+Grew
+Green
+Open
+Close

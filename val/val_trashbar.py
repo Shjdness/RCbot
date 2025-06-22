@@ -4,6 +4,7 @@ import numpy as np
 from ultralytics import YOLO
 from collections import defaultdict
 from PIL import Image, ImageDraw, ImageFont
+import math
 
 # 类别映射
 CLASS_MAP = {
@@ -44,6 +45,11 @@ def load_model(model_path):
     model = YOLO(model_path)
     return model
 
+def calculate_center(bbox):
+    """计算边界框的中心点"""
+    x1, y1, x2, y2 = bbox
+    return ((x1 + x2) // 2, (y1 + y2) // 2)
+
 def match_trash_bins(trash_bins, statuses):
     """将垃圾桶和状态进行匹配"""
     matched_bins = []
@@ -56,15 +62,20 @@ def match_trash_bins(trash_bins, statuses):
         
         for status in statuses:
             status_center = status["center"]
-            distance = np.sqrt((bin_center[0] - status_center[0])**2 + 
-                              (bin_center[1] - status_center[1])**2)
+            distance = math.sqrt((bin_center[0] - status_center[0])**2 + 
+                                (bin_center[1] - status_center[1])**2)
+            
+            # 考虑状态框应该在垃圾桶框的上方或附近
+            vertical_distance = status_center[1] - bin_center[1]
+            if vertical_distance < 0:  # 状态在垃圾桶上方
+                distance *= 0.8  # 降低距离权重
             
             if distance < min_distance:
                 min_distance = distance
                 closest_status = status
         
         # 如果找到合适的状态且距离在阈值内
-        if closest_status and min_distance < 100:  # 距离阈值设为100像素
+        if closest_status and min_distance < min(bin["width"] * 1.5, bin["height"] * 1.5):
             matched_bins.append({
                 "type": bin["type"],
                 "bbox": bin["bbox"],
@@ -83,7 +94,7 @@ def analyze_image(model, image_path, output_dir):
         return None
     
     # 使用模型进行预测
-    results = model(image, conf=0.3)  # 置信度阈值设为0.3
+    results = model(image, conf=0.25)  # 置信度阈值设为0.25
     
     # 分离垃圾桶类型和状态检测结果
     trash_bins = []   # 垃圾桶类型 (Blue, Red, Grey, Green)
@@ -96,9 +107,10 @@ def analyze_image(model, image_path, output_dir):
             conf = float(box.conf)
             bbox = box.xyxy[0].cpu().numpy().astype(int)
             
-            # 计算中心点
-            center_x = (bbox[0] + bbox[2]) // 2
-            center_y = (bbox[1] + bbox[3]) // 2
+            # 计算中心点和尺寸
+            center = calculate_center(bbox)
+            width = bbox[2] - bbox[0]
+            height = bbox[3] - bbox[1]
             
             # 分类存储
             if class_name in ["Blue", "Red", "Grey", "Green"]:
@@ -106,14 +118,16 @@ def analyze_image(model, image_path, output_dir):
                     "type": class_name,
                     "bbox": bbox,
                     "conf": conf,
-                    "center": (center_x, center_y)
+                    "center": center,
+                    "width": width,
+                    "height": height
                 })
             elif class_name in ["Open", "Close"]:
                 statuses.append({
                     "type": class_name,
                     "bbox": bbox,
                     "conf": conf,
-                    "center": (center_x, center_y)
+                    "center": center
                 })
     
     # 匹配垃圾桶和状态
@@ -121,16 +135,18 @@ def analyze_image(model, image_path, output_dir):
     
     # 输出结果
     print(f"图像: {os.path.basename(image_path)}")
-    print(f"检测到 {len(matched_bins)} 个垃圾桶:")
-    
-    bin_counts = defaultdict(int)
-    for bin in matched_bins:
-        bin_type = bin["type"]
-        status = bin["status"]
-        bin_counts[bin_type] += 1
-        print(f"- {CHINESE_NAMES[bin_type]}: {CHINESE_NAMES[status]}")
+    if matched_bins:
+        print(f"检测到 {len(matched_bins)} 个垃圾桶:")
+        for bin in matched_bins:
+            print(f"- {CHINESE_NAMES[bin['type']]}: {CHINESE_NAMES[bin['status']]}")
+    else:
+        print("未检测到匹配的垃圾桶")
     
     # 统计每种垃圾桶的数量
+    bin_counts = defaultdict(int)
+    for bin in matched_bins:
+        bin_counts[bin["type"]] += 1
+    
     for bin_type, count in bin_counts.items():
         print(f"  {CHINESE_NAMES[bin_type]}: {count}个")
     
@@ -180,26 +196,26 @@ def draw_detections(image, matched_bins):
                       outline=status_color, width=2)
         
         # 绘制连接线
-        bin_center = ((bin_bbox[0] + bin_bbox[2]) // 2, (bin_bbox[1] + bin_bbox[3]) // 2)
-        status_center = ((status_bbox[0] + status_bbox[2]) // 2, (status_bbox[1] + status_bbox[3]) // 2)
+        bin_center = calculate_center(bin_bbox)
+        status_center = calculate_center(status_bbox)
         draw.line([bin_center, status_center], fill=(255, 255, 0), width=2)
         
         # 绘制垃圾桶类型标签
         bin_label = f"{CHINESE_NAMES[bin_type]}"
         bin_text_size = font.getbbox(bin_label)
-        draw.rectangle([(bin_bbox[0], bin_bbox[1] - bin_text_size[3] + bin_text_size[1]), 
-                       (bin_bbox[0] + bin_text_size[2] - bin_text_size[0], bin_bbox[1])], 
+        draw.rectangle([(bin_bbox[0], bin_bbox[1] - bin_text_size[3] + bin_text_size[1] - 5), 
+                       (bin_bbox[0] + bin_text_size[2] - bin_text_size[0] + 10, bin_bbox[1] + 5)], 
                       fill=bin_color)
-        draw.text((bin_bbox[0], bin_bbox[1] - bin_text_size[3] + bin_text_size[1]), 
+        draw.text((bin_bbox[0] + 5, bin_bbox[1] - bin_text_size[3] + bin_text_size[1] - 5), 
                  bin_label, fill=(255, 255, 255), font=font)
         
         # 绘制状态标签
         status_label = f"状态: {CHINESE_NAMES[status]}"
         status_text_size = font.getbbox(status_label)
-        draw.rectangle([(status_bbox[0], status_bbox[1] - status_text_size[3] + status_text_size[1]), 
-                       (status_bbox[0] + status_text_size[2] - status_text_size[0], status_bbox[1])], 
+        draw.rectangle([(status_bbox[0], status_bbox[1] - status_text_size[3] + status_text_size[1] - 5), 
+                       (status_bbox[0] + status_text_size[2] - status_text_size[0] + 10, status_bbox[1] + 5)], 
                       fill=status_color)
-        draw.text((status_bbox[0], status_bbox[1] - status_text_size[3] + status_text_size[1]), 
+        draw.text((status_bbox[0] + 5, status_bbox[1] - status_text_size[3] + status_text_size[1] - 5), 
                  status_label, fill=(0, 0, 0), font=font)
     
     # 在图像顶部添加汇总信息
@@ -266,13 +282,16 @@ def test_model(model_path, test_dir, output_dir):
     print(f"测试图像总数: {len(all_results)}")
     print(f"检测到垃圾桶总数: {total_bins}")
     
-    print("\n垃圾桶类型分布:")
-    for bin_type, count in bin_type_counts.items():
-        print(f"  {CHINESE_NAMES[bin_type]}: {count}个 ({count/total_bins*100:.1f}%)")
-    
-    print("\n垃圾桶状态分布:")
-    for status, count in status_counts.items():
-        print(f"  {CHINESE_NAMES[status]}: {count}个 ({count/total_bins*100:.1f}%)")
+    if total_bins > 0:
+        print("\n垃圾桶类型分布:")
+        for bin_type, count in bin_type_counts.items():
+            print(f"  {CHINESE_NAMES[bin_type]}: {count}个 ({count/total_bins*100:.1f}%)")
+        
+        print("\n垃圾桶状态分布:")
+        for status, count in status_counts.items():
+            print(f"  {CHINESE_NAMES[status]}: {count}个 ({count/total_bins*100:.1f}%)")
+    else:
+        print("\n未检测到任何垃圾桶")
     
     print("=" * 80)
     print(f"所有标记后的图像已保存到: {output_dir}")
